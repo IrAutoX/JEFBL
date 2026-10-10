@@ -1,0 +1,23 @@
+[
+{
+  "name": "COLIT",
+  "id": "colit",
+  "version": "0.1.0",
+  "author": "DeathAmir & IrAutoX",
+  "description": "COLIT — AI coding assistant for JEFB.",
+  "category": "ai",
+  "tags": ["ai", "assistant", "chat"],
+  "icon": "sparkles",
+  "homepage": "https://github.com/IrAutoX/JEFBL/tree/main/plugins/colit",
+  "download": "https://github.com/IrAutoX/JEFBL/releases/download/colit-v0.1.0/colit.jar",
+  "repository": "https://github.com/IrAutoX/JEFBL",
+  "license": "MIT",
+  "jefb_min_version": "2.0.0",
+  "main_class": "ir.IrAutoX.colit.ColitPlugin",
+  "screenshots": [
+    "https://raw.githubusercontent.com/IrAutoX/JEFBL/main/plugins/colit/preview-1.png"
+  ],
+  "created_at": "2026-10-10",
+  "updated_at": "2026-10-10"
+}
+]
