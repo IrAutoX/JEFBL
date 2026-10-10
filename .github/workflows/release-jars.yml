@@ -1,0 +1,122 @@
+name: Release Plugin JARs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/**/*.jar'
+      - 'plugins/**/plugin.json'
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: 'Plugin ID to release (empty = all)'
+        required: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.set.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect plugins
+        id: set
+        run: |
+          if [ -n "${{ github.event.inputs.plugin }}" ]; then
+            PLUGINS='["${{ github.event.inputs.plugin }}"]'
+          else
+            CHANGED=$(git diff --name-only HEAD^ HEAD 2>/dev/null | grep -E '^plugins/[^/]+/(.*\.jar|plugin\.json)$' | cut -d/ -f2 | sort -u)
+            if [ -z "$CHANGED" ]; then
+              CHANGED=$(ls -d plugins/*/ 2>/dev/null | cut -d/ -f2)
+            fi
+            PLUGINS=$(echo "$CHANGED" | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          fi
+          echo "plugins=$PLUGINS" >> $GITHUB_OUTPUT
+
+  release:
+    needs: detect
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        plugin: ${{ fromJson(needs.detect.outputs.plugins) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read plugin metadata
+        id: meta
+        run: |
+          PLUGIN="${{ matrix.plugin }}"
+          if [ ! -f "plugins/$PLUGIN/plugin.json" ]; then
+            echo "❌ No plugin.json for $PLUGIN"
+            exit 1
+          fi
+          VERSION=$(jq -r '.version' plugins/$PLUGIN/plugin.json)
+          NAME=$(jq -r '.name' plugins/$PLUGIN/plugin.json)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          echo "tag=${PLUGIN}-v${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Find JAR file
+        id: jar
+        run: |
+          PLUGIN="${{ matrix.plugin }}"
+          JAR=$(find plugins/$PLUGIN -maxdepth 1 -name "*.jar" | head -1)
+          if [ -z "$JAR" ]; then
+            echo "❌ No .jar found in plugins/$PLUGIN/"
+            exit 1
+          fi
+          echo "path=$JAR" >> $GITHUB_OUTPUT
+          echo "name=$(basename $JAR)" >> $GITHUB_OUTPUT
+          echo "✅ Found: $JAR"
+
+      - name: Check if tag exists
+        id: check
+        run: |
+          TAG="${{ steps.meta.outputs.tag }}"
+          if git ls-remote --tags origin "$TAG" | grep -q "refs/tags/$TAG$"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "⚠️ Tag $TAG already exists — skipping"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "✅ Tag $TAG is new"
+          fi
+
+      - name: Get changelog
+        id: changelog
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          PLUGIN="${{ matrix.plugin }}"
+          if [ -f "plugins/$PLUGIN/CHANGELOG.md" ]; then
+            echo "body<<EOF" >> $GITHUB_OUTPUT
+            cat plugins/$PLUGIN/CHANGELOG.md >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "body=Release ${{ steps.meta.outputs.name }} v${{ steps.meta.outputs.version }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }} v${{ steps.meta.outputs.version }}
+          body: ${{ steps.changelog.outputs.body }}
+          files: ${{ steps.jar.outputs.path }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.check.outputs.exists }}" = "true" ]; then
+            echo "⚠️ ${{ matrix.plugin }}: skipped (tag exists)"
+          else
+            echo "✅ ${{ matrix.plugin }}: released as ${{ steps.meta.outputs.tag }}"
+          fi
